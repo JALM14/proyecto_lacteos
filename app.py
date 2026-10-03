@@ -1,25 +1,25 @@
 ﻿# IMPORTACIÓN DE LIBRERÍAS DEL SISTEMA
-import streamlit as st
-import pandas as pd
 import datetime
-import io
 import hashlib
+import io
+import pandas as pd
 import plotly.express as px
+import streamlit as st
 from sqlalchemy import text
 
-# IMPORTACIÓN DE MÓDULOS LOCALES DE BASE DE DATOS Y FUENTES OFICIALES CON ESTADÍSTICA AVANZADA
+# IMPORTACIÓN DE MÓDULOS LOCALES
 from database import get_engine, cargar_datos_desde_bd
 from external_gov_data import (
-    obtener_inflacion_leche_entera_inegi, 
+    obtener_inflacion_leche_entera_inegi,
     obtener_precios_sniim_leche_entera,
     analizar_iqr_merma,
     analizar_zscore_merma
 )
 
-# CONFIGURACIÓN INICIAL DE LA PÁGINA WEB DE STREAMLIT
+# CONFIGURACIÓN DE STREAMLIT
 st.set_page_config(page_title="TPV 1 - Abonares la Dinamita", layout="wide")
 
-# ESTILOS CSS CON LOS COLORES OSCUROS Y ARMÓNICOS
+# ESTILOS CSS
 st.markdown("""
 <style>
     .banner-verde {
@@ -39,23 +39,22 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# INICALIZACIÓN DE VARIABLES DE ESTADO DE SESIÓN
-if 'usuario_autenticado' not in st.session_state:
+# VARIABLES DE SESIÓN
+if "usuario_autenticado" not in st.session_state:
     st.session_state.usuario_autenticado = False
-if 'datos_usuario' not in st.session_state:
+if "datos_usuario" not in st.session_state:
     st.session_state.datos_usuario = None
-if 'ticket' not in st.session_state:
+if "ticket" not in st.session_state:
     st.session_state.ticket = {}
 
-# OBTENER MOTOR DE CONEXIÓN MYSQL EN LARAGON
+# CONEXIÓN A BASE DE DATOS
 engine = get_engine()
 
+# FUNCIONES DE AUTENTICACIÓN
 def hash_pass(password: str) -> str:
-    """Genera un hash SHA-256 a partir de la contraseña plana."""
     return hashlib.sha256(password.encode()).hexdigest()
 
 def validar_credenciales(username, password):
-    """Consulta en la base de datos si el usuario y hash coinciden."""
     h = hash_pass(password)
     with engine.connect() as conn:
         res = conn.execute(
@@ -76,7 +75,7 @@ if not st.session_state.usuario_autenticado:
         st.markdown("### Acceso al sistema del departamento de lácteos")
         
         with st.form("form_login"):
-            user_input = st.text_input("Usuario:", placeholder="Ej. cajero, gerente o admin")
+            user_input = st.text_input("Username:", placeholder="Ej. cajero, gerente, admin o superadmin")
             pass_input = st.text_input("Contraseña:", type="password")
             btn_login = st.form_submit_button("Ingresar", type="primary", use_container_width=True)
             
@@ -88,7 +87,7 @@ if not st.session_state.usuario_autenticado:
                     st.success(f"Bienvenido, {usuario_valido['nombre']}")
                     st.rerun()
                 else:
-                    st.error("Credenciales incorrectas. Verifique usuario y contraseña.")
+                    st.error("Username o contraseña incorrectos.")
         st.caption("¡Bienvenid@! List@ para un gran día de trabajo")
 
 # ==============================================================================
@@ -98,12 +97,13 @@ else:
     user_info = st.session_state.datos_usuario
     rol = user_info['rol']
 
-    # Barra lateral de información de usuario y TPV
+    # Barra lateral
     st.sidebar.markdown(f"### 👤 {user_info['nombre']}")
+    st.sidebar.markdown(f"**Username:** `{user_info['username']}`")
     st.sidebar.markdown(f"**ROL:** `{rol}`")
     st.sidebar.markdown("**PROYECTO TPV** \n *EQUIPO DINAMITA* \n 'VERSIÓN 3.18'")
     
-    if st.sidebar.button("Cerrar sesión", type="secondary"):
+    if st.sidebar.button("🚪 Cerrar sesión", type="secondary"):
         st.session_state.usuario_autenticado = False
         st.session_state.datos_usuario = None
         st.session_state.ticket = {}
@@ -112,13 +112,14 @@ else:
     st.sidebar.markdown("---")
     st.sidebar.markdown("#### Navegación")
 
-    # MATRIZ DE PERMISOS DE VISUALIZACIÓN
+    # MATRIZ DE PERMISOS 
     modulos_posibles = {
-        "Ventas": ["Cajero", "Gerente", "Propietario"],
-        "Recibidos": ["Cajero", "Gerente", "Propietario"],
-        "Turno": ["Cajero", "Gerente", "Propietario"],
-        "Artículos": ["Gerente", "Propietario"],
-        "📊 Dashboard & Ciencia de Datos": ["Propietario"]
+        "Ventas": ["Cajero", "Gerente", "Admin", "Admin", "Super Admin"],
+        "Recibidos": ["Cajero", "Gerente", "Admin", "Admin", "Super Admin"],
+        "Turno": ["Cajero", "Gerente", "Admin", "Admin", "Super Admin"],
+        "Artículos": ["Gerente", "Admin", "Admin", "Super Admin"],
+        "📊 Dashboard & Ciencia de Datos": [ "Admin",  "Super Admin"],
+        "👥 Registrar Usuarios": ["Super Admin"]
     }
 
     modulos_autorizados = [mod for mod, roles in modulos_posibles.items() if rol in roles]
@@ -128,7 +129,7 @@ else:
     st.sidebar.caption("Proyecto de Ciencia de Datos • Lácteos")
 
     # --------------------------------------------------------------------------
-    # MÓDULO: VENTAS (TPV)
+    # MÓDULO: VENTAS
     # --------------------------------------------------------------------------
     if menu == "Ventas":
         st.markdown('<div class="banner-verde">🛒 Ticket • Cobro en tienda</div>', unsafe_allow_html=True)
@@ -136,8 +137,7 @@ else:
         
         with col_prod:
             buscar = st.text_input("🔍 Buscar artículo:", placeholder="Escribe el nombre del lácteo...")
-            query_art = "SELECT * FROM articulos"
-            df_art = pd.read_sql(query_art, con=engine)
+            df_art = pd.read_sql("SELECT * FROM articulos", con=engine)
             
             if buscar:
                 df_art = df_art[df_art['nombre'].str.contains(buscar, case=False)]
@@ -145,7 +145,7 @@ else:
             for _, row in df_art.iterrows():
                 c1, c2, c3 = st.columns([3, 1.5, 1])
                 with c1:
-                    st.markdown(f"**{row['nombre']}**  \n<small style='color:gray;'>{row['inventario']} pzas disponibles</small>", unsafe_allow_html=True)
+                    st.markdown(f"**{row['nombre']}** \n<small style='color:gray;'>{row['inventario']} pzas disponibles</small>", unsafe_allow_html=True)
                 with c2:
                     st.write(f"**{row['precio']:.2f} $**")
                 with c3:
@@ -212,7 +212,7 @@ else:
             st.dataframe(df_rec, use_container_width=True, hide_index=True)
 
     # --------------------------------------------------------------------------
-    # MÓDULO: TURNO (APERTURA Y CIERRE DE CAJA)
+    # MÓDULO: TURNO
     # --------------------------------------------------------------------------
     elif menu == "Turno":
         st.markdown('<div class="banner-verde">⏰ Control de turno y caja</div>', unsafe_allow_html=True)
@@ -257,7 +257,7 @@ else:
                 st.rerun()
 
     # --------------------------------------------------------------------------
-    # MÓDULO: ARTÍCULOS (INVENTARIO)
+    # MÓDULO: ARTÍCULOS
     # --------------------------------------------------------------------------
     elif menu == "Artículos":
         st.markdown('<div class="banner-verde">📦 Artículos • Departamento de lácteos</div>', unsafe_allow_html=True)
@@ -289,11 +289,64 @@ else:
                         st.error(f"Error al guardar: {ex}")
 
     # --------------------------------------------------------------------------
-    # MÓDULO: DASHBOARD & CIENCIA DE DATOS (RESTRINGIDO SOLO A PROPIETARIO)
+    # MÓDULO: REGISTRAR USUARIOS 
+    # --------------------------------------------------------------------------
+    elif menu == "👥 Registrar Usuarios":
+        if rol != "Super Admin":
+            st.error("⚠️ Acceso denegado. Solo el Super Admin puede registrar usuarios.")
+            st.stop()
+
+        st.markdown('<div class="banner-verde">👥 Administración de Usuarios</div>', unsafe_allow_html=True)
+        st.subheader("Registrar nuevo usuario")
+        st.info("El Super Admin puede registrar las cuentas que tendrán acceso al sistema y asignarles el rol correspondiente.")
+
+        with st.form("form_registrar_usuario", clear_on_submit=True):
+            username_nuevo = st.text_input("Username:", placeholder="Ej. cajero2")
+            password_nueva = st.text_input("Contraseña:", type="password", placeholder="Ingresa una contraseña")
+            nombre_nuevo = st.text_input("Nombre completo:", placeholder="Nombre y apellidos")
+            edad_nueva = st.number_input("Edad:", min_value=18, max_value=100, value=18, step=1)
+            genero_nuevo = st.selectbox("Género:", ["Masculino", "Femenino", "Otro"])
+            correo_nuevo = st.text_input("Correo electrónico:", placeholder="correo@ejemplo.com")
+            rol_nuevo = st.selectbox("Rol del usuario:", ["Cajero", "Gerente", "Admin", "Propietario"])
+            boton_registrar = st.form_submit_button("👤 Registrar Usuario", type="primary", use_container_width=True)
+
+            if boton_registrar:
+                u_limpio = username_nuevo.strip()
+                p_limpia = password_nueva.strip()
+                n_limpio = nombre_nuevo.strip()
+                c_limpio = correo_nuevo.strip()
+
+                if not u_limpio or not p_limpia or not n_limpio or not c_limpio:
+                    st.warning("Todos los campos son obligatorios.")
+                elif "@" not in c_limpio:
+                    st.warning("Ingresa un correo electrónico válido.")
+                else:
+                    try:
+                        with engine.connect() as conn:
+                            user_ex = conn.execute(
+                                text("SELECT id FROM usuarios WHERE username = :u"),
+                                {"u": u_limpio}
+                            ).fetchone()
+
+                        if user_ex:
+                            st.error(f"El username '{u_limpio}' ya está registrado.")
+                        else:
+                            p_hash = hash_pass(p_limpia)
+                            with engine.begin() as conn:
+                                conn.execute(
+                                    text("INSERT INTO usuarios (username, password_hash, nombre_completo, rol, edad, genero, correo_electronico) VALUES (:u, :p, :n, :r, :e, :g, :c)"),
+                                    {"u": u_limpio, "p": p_hash, "n": n_limpio, "r": rol_nuevo, "e": int(edad_nueva), "g": genero_nuevo, "c": c_limpio}
+                                )
+                            st.success(f"✅ Usuario '{u_limpio}' registrado correctamente con el rol '{rol_nuevo}'.")
+                    except Exception as ex:
+                        st.error(f"Error al registrar usuario: {ex}")
+
+    # --------------------------------------------------------------------------
+    # MÓDULO: DASHBOARD & CIENCIA DE DATOS 
     # --------------------------------------------------------------------------
     elif menu == "📊 Dashboard & Ciencia de Datos":
-        if rol != "Propietario":
-            st.error("⚠️ Acceso denegado. Este módulo analítico está reservado exclusivamente para el Propietario.")
+        if rol not in ["Gerente", "Admin", "Propietario", "Super Admin"]:
+            st.error("⚠️ Acceso denegado. Este módulo analítico está reservado para Administradores, Propietarios o Super Admin.")
         else:
             st.markdown('<div class="banner-verde">📊 Dashboard & Ciencia de Datos • Analítica y Comparativa Oficial</div>', unsafe_allow_html=True)
             
@@ -323,7 +376,6 @@ else:
                     "💾 Descargas (CSV / Excel)"
                 ])
 
-                # PESTAÑA 1: MÉTRICAS DE LA TIENDA
                 with tab_interna:
                     k1, k2, k3, k4 = st.columns(4)
                     k1.metric("Ingresos Totales", f"${df_filtrado['ingreso_total'].sum():,.2f}")
@@ -347,10 +399,9 @@ else:
                         fig_pie = px.pie(gan_p, values='ganancia', names='producto', hole=0.4)
                         st.plotly_chart(fig_pie, use_container_width=True)
 
-                # PESTAÑA 2: COMPARATIVA DE LECHE ENTERA 1L
                 with tab_comparativa:
                     st.subheader("🥛 Análisis Especializado: Leche Entera 1L frente a Fuentes Oficiales")
-                    st.caption("Contraste del precio y evolución de ventas de 'Leche Entera 1L' frente a los precios de la Secretaría de Economía (SNIIM) y la inflación del INEGI (36 meses).")
+                    st.caption("Contraste del precio y evolución de ventas de 'Leche Entera 1L' frente a los precios de la Secretaría de Economía (SNIIM) y la inflación del INEGI.")
                     
                     df_sniim_leche = obtener_precios_sniim_leche_entera()
                     precio_prom_tienda = df_bi[df_bi['producto'] == 'Leche Entera 1L']['precio_unitario'].mean()
@@ -366,14 +417,9 @@ else:
                             {"Indicador": "Promedio Tu Tienda", "Precio ($MXN)": round(precio_prom_tienda, 2)},
                             {"Indicador": "Máximo Oficial SNIIM", "Precio ($MXN)": df_sniim_leche['Precio_Max_MXN'].iloc[0]}
                         ])
-                        fig_sniim = px.bar(
-                            df_bar_comp, x="Indicador", y="Precio ($MXN)", color="Indicador",
-                            color_discrete_sequence=["#6baed6", "#2ca02c", "#fd8d3c"],
-                            title="Precio Leche Entera 1L: Tienda vs. Rango SNIIM"
-                        )
+                        fig_sniim = px.bar(df_bar_comp, x="Indicador", y="Precio ($MXN)", color="Indicador", color_discrete_sequence=["#6baed6", "#2ca02c", "#fd8d3c"], title="Precio Leche Entera 1L: Tienda vs. Rango SNIIM")
                         st.plotly_chart(fig_sniim, use_container_width=True)
 
-                # PESTAÑA 3: ANÁLISIS ESTADÍSTICO DE PÉRDIDA POR MERMA (IQR & Z-Score) - SOLO PROPIETARIO
                 with tab_merma_stats:
                     st.subheader("⚠️ Análisis estadístico avanzado Detección de anomalías de pérdida por merma")
                     st.caption("Criterio operativo: Los valores normales de merma son 0.00; cualquier registro superior a 0.00 se cataloga como evento atípico o incidencia a vigilar.")
@@ -389,50 +435,26 @@ else:
                         m4.metric("Incidencias con Merma > $0", f"{res_iqr['total_con_merma']:,}")
                         
                         st.markdown("---")
-                        
                         col_est1, col_est2 = st.columns(2)
-                        
                         with col_est1:
                             st.markdown("#### 📐 Parámetros estadísticos IQR")
-                            st.success(f"""
-                            * **Límite Inferior:** `{res_iqr['Limite_Inferior']:.2f}`
-                            * **Límite Superior:** `{res_iqr['Limite_Superior']:.2f}`
-                            * **Total Registros Evaluados:** `{res_iqr['total_analizados']:,}`
-                            * **Eventos Atípicos Detectados:** `{len(res_iqr['df_outliers']):,}`
-                            """)
+                            st.success(f"* **Límite Inferior:** `{res_iqr['Limite_Inferior']:.2f}`\n* **Límite Superior:** `{res_iqr['Limite_Superior']:.2f}`\n* **Total Registros Evaluados:** `{res_iqr['total_analizados']:,}`\n* **Eventos Atípicos Detectados:** `{len(res_iqr['df_outliers']):,}`")
                             
                         with col_est2:
                             st.markdown("#### 📊 Parámetros Z-Score (|Z| > 2)")
-                            st.success(f"""
-                            * **Criterio de Desviación:** `Z > 2.0`
-                            * **Anomalías Críticas Detectadas:** `{len(df_outliers_z):,}`
-                            * **Estado del Módulo:** `Activo e Interactivo`
-                            """)
+                            st.success(f"* **Criterio de Desviación:** `Z > 2.0`\n* **Anomalías Críticas Detectadas:** `{len(df_outliers_z):,}`\n* **Estado del Módulo:** `Activo e Interactivo`")
                             
                         st.markdown("---")
                         st.markdown("### 📈 Visualización avanzada de anomalías de merma")
-                        st.caption("Gráfico interactivo de disperción: Muestra la magnitud de la pérdida por merma en el tiempo. Desglosada por producto.")
+                        st.caption("Gráfico interactivo de dispersión: Muestra la magnitud de la pérdida por merma en el tiempo. Desglosada por producto.")
                     
-                        
-                        # GRÁFICO MODERNO DE DISPERSIÓN (SCATTER PLOT) EN LUGAR DEL DIAGRAMA DE CAJA TRADICIONAL
                         if not res_iqr['df_outliers'].empty:
                             fig_scatter = px.scatter(
-                                res_iqr['df_outliers'],
-                                x="fecha",
-                                y="perdida_merma",
-                                color="producto",
-                                size="perdida_merma",
-                                hover_data=["faltantes", "ingreso_total"],
-                                labels={"fecha": "Fecha del registro", "perdida_merma": "Pérdida por merma", "producto": "Lácteo"},
+                                res_iqr['df_outliers'], x="fecha", y="perdida_merma", color="producto", size="perdida_merma",
+                                hover_data=["faltantes", "ingreso_total"], labels={"fecha": "Fecha del registro", "perdida_merma": "Pérdida por merma", "producto": "Lácteo"},
                                 title="Magnitud y distribución temporal de pérdidas por merma (> 0.00)"
                             )
-                            fig_scatter.update_layout(
-                                plot_bgcolor="#1E222B",
-                                paper_bgcolor="#0E1117",
-                                font_color="white",
-                                xaxis_tickangle=-30,
-                                height=450
-                            )
+                            fig_scatter.update_layout(plot_bgcolor="#1E222B", paper_bgcolor="#0E1117", font_color="white", xaxis_tickangle=-30, height=450)
                             st.plotly_chart(fig_scatter, use_container_width=True)
                         else:
                             st.info("No hay incidencias de merma mayores a cero para graficar en este rango.")
@@ -448,7 +470,6 @@ else:
                     else:
                         st.info("No hay suficientes datos de pérdida por merma en el rango seleccionado.")
 
-                # PESTALA 4: DISTRIBUCIONES ESTADÍSTICAS
                 with tab_dist:
                     st.subheader("Análisis de distribución")
                     d1, d2 = st.columns(2)
@@ -460,7 +481,6 @@ else:
                         fig_b.update_layout(xaxis_tickangle=-45)
                         st.plotly_chart(fig_b, use_container_width=True)
 
-                # PESTAÑA 5: EXPORTACIÓN
                 with tab_export:
                     st.subheader("Exportación de datos")
                     col_c, col_e = st.columns(2)
